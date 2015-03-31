@@ -1,0 +1,130 @@
+//Group no : 6
+//Contact email : sgundecha@ufl.edu
+
+//Data precision(input and output) : 8 - bt unsigned array with binary values
+//Data size range : from 2x2 matrix to 2^15x2^15
+
+//Description of code : Implementing Image processing Canny edge detection kernel using Intel IPP library.The kernel size is 3x3.
+//The four middle columns are selected and they are assigned value 200. Edges are formed around these four columns
+//The kernel is then executed for 1000 times. And the kernel execution time is averaged over the 1000 values.
+
+#include "ipp.h"
+#include <fstream>
+using namespace std;
+
+
+extern void* ipView_8u_C1R(const Ipp8u* pData, int step, IppiSize roi,
+	const char* caption, int isModalView); //from ippview.cpp
+
+int main()
+{
+	
+	//Timing variables
+	long double start_clock, stop_clock, t;
+	long double sum[15];
+	int count = 0;
+
+	//Variables for sobel and canny detectors
+	int imageStep;
+	Ipp8u *imageOffset;
+	int sobelHorizStep;
+	int sobelVertStep;
+	int outputStep;
+	float lowThresh = 50.0f;
+	float highThresh = 140.0f;
+	int bufferSize;
+
+	//Get the clock frequency
+	int mhz;
+	ippGetCpuFreqMhz(&mhz);	
+
+	for (int i = 2; i < 32779; i = i * 2)
+	{
+		// Allocate space for input image
+		
+		Ipp8u *image = ippiMalloc_8u_C1(i, i, &imageStep);
+
+		//Initializing middle column values of the image to 200
+		for (int i = 0; i < i * i; i++)
+		{
+			if (i % i == (i / 2 - 1) || i % 1024 == (i / 2) || i % 1024 == (i / 2 + 1) || i % 1024 == (i / 2 + 2))
+			{
+				image[i] = 0;
+			}
+			else
+			{
+				image[i] = 200;
+			}
+		}
+
+		// Offset into input image
+		imageOffset = image + imageStep + 1;
+
+		
+
+			// Allocate space for horizontal sobel filter response
+			Ipp16s *sobelHoriz = ippiMalloc_16s_C1(i, i, &sobelHorizStep);
+
+			// Allocate space for vertical sobel filter response
+			Ipp16s *sobelVert = ippiMalloc_16s_C1(i, i, &sobelVertStep);
+
+			// Allocate space for result
+			Ipp8u *output = ippiMalloc_8u_C1(i, i, &outputStep);
+
+			// Define roi-size
+			IppiSize roiSize = { i, i };
+
+			// Get size of canny buffer
+			ippiCannyGetSize(roiSize, &bufferSize);
+
+			// Allocate canny buffer
+			Ipp8u *buffer = ippsMalloc_8u(bufferSize);
+
+
+			for (int m = 0; m < 1000; m++)
+			{
+				//start the timer
+				start_clock = ippGetCpuClocks();
+
+				// Do vertical and horizontal sobel filtering
+				ippiFilterSobelVert_8u16s_C1R(imageOffset, imageStep, sobelVert, sobelVertStep, roiSize, ippMskSize3x3);
+				ippiFilterSobelHoriz_8u16s_C1R(imageOffset, imageStep, sobelHoriz, sobelHorizStep, roiSize, ippMskSize3x3);
+
+				// Do canny edge detection
+				ippiCanny_16s8u_C1R(sobelVert, sobelVertStep, sobelHoriz, sobelHorizStep, output, outputStep, roiSize, lowThresh, highThresh, buffer);
+				
+				//stop the timer
+				stop_clock = ippGetCpuClocks();
+				
+				//calculate the time required by the kernel to execute for one run.
+				t = stop_clock - start_clock;
+				sum[count] = sum[count] + t;		// Sum updated on each run
+			}
+
+			//Calculating the avrage tie required for 100 runs in useconds
+			sum[count] = ((sum[count] / mhz) / 1000);
+
+			//Display the edge detected image
+			//ipView_8u_C1R(output, imageStep, roiSize, "output", 1);
+
+			// Memory cleanup
+			ippiFree(output);
+			ippiFree(image);
+			ippiFree(sobelHoriz);
+			ippiFree(sobelVert);
+			ippsFree(buffer);
+			
+			//increment the count to 
+			count++;
+	}
+	
+	//Write the average calculated time in a text file
+	ofstream file;
+	file.open("canny_result.txt");
+	for (int i = 0; i < 15; i++)
+	{
+		file << "Average time taken for 2^" << i << " = " << sum[i] << endl;
+	}
+	file.close();
+	return 0;
+}
